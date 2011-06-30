@@ -34,8 +34,11 @@ import gtk
 import Skype4Py
 
 import os
+import sys
 import commands
 import time
+
+import threading
 
 def do_nothing(indicator):
     True
@@ -46,7 +49,7 @@ class NotificationServer:
     self.server = indicate.indicate_server_ref_default()
     self.server.set_type("message.im")
 #   this is kinda ugly, or?
-    self.server.set_desktop_file("/usr/share/applications/skype.desktop")
+    self.server.set_desktop_file("/usr/share/applications/skype-wrapper.desktop")
     self.server.show()
     pass
 
@@ -57,9 +60,6 @@ class NotificationServer:
   def on_click(self, server,data=None):
     self.skype.skype.Client.Focus()
 
-  def activate_timeout_check(self):
-    gobject.timeout_add_seconds(5, self.skype.check_timeout, self.server)
-
   def show_conversation(self, indicator, timestamp):
     display_name = indicator.get_property("name")
 
@@ -68,40 +68,25 @@ class NotificationServer:
     # this might blow up.. don't know why, seems like an error within skype
     self.skype.show_chat_windows(display_name);
 
-  # this is needed, cause otherwise the skype menu is only showed
-  # when there are new unread messages.. another workaround
-  def workaround_show_skype():
-    indicator = indicate.Indicator()
-    indicator.set_property("name", "workaround..")
-    indicator.connect("user-display", self.show_conversation)
-    indicator.show()
-    indicator.hide()
-
   def show_indicator(self, conversation):
     print "adding " + conversation.display_name
 
-    try:
-      # Ubuntu 9.10 and above
-      indicator = indicate.Indicator()
-    except:
-      # Ubuntu 9.04
-      indicator = indicate.IndicatorMessage()
+    #try:
+      ## Ubuntu 9.10 and above
+      #indicator = indicate.Indicator()
+    #except:
+      ## Ubuntu 9.04
+      #indicator = indicate.IndicatorMessage()
 
+    indicator = indicate.Indicator()
     indicator.set_property("name", conversation.display_name)
     indicator.set_property("subtype", "instant")
     indicator.set_property('draw-attention', 'true');
 
-    # we can only display timestamp OR count
-    if conversation.count == 1:
-      indicator.set_property_time('time', conversation.timestamp)
-    else:
-      indicator.set_property('count', str(conversation.count));
-
+    indicator.set_property_time('time', conversation.timestamp)
+   
     indicator.connect("user-display", self.show_conversation)
     indicator.show()
-
-    # TODO: why?
-    gobject.timeout_add_seconds(5, do_nothing, indicator)
 
 
 class UnreadConversation:
@@ -122,10 +107,24 @@ class UnreadConversation:
 class SkypeBehaviour:
   # initialize skype
   def __init__(self):
-    self.skype = Skype4Py.Skype();
-    self.skype.OnAttachmentStatus = self.OnAttach;
-    self.skype.OnMessageStatus = self.OnMessageStatus; 
-    self.skype.Attach();
+    print "entering init, defining skype"  
+    self.skype = Skype4Py.Skype()
+    self.skype.Client.Start(Minimized=True)
+
+
+    print "attaching..."
+    time.sleep(4)
+    while True:
+        try:
+            self.skype.Attach(Wait=False)
+            break
+        except:
+            print "."
+                        
+    print "attached. bam!"
+    time.sleep(2)
+    print "set OnMessageStatus"
+    self.skype.OnMessageStatus = self.OnMessageStatus
     self.name_mappings = {}
     self.unread_conversations = {}
     self.cb_show_conversation = None
@@ -137,72 +136,59 @@ class SkypeBehaviour:
   def SetShowIndicatorCallback(self, func):
     self.cb_show_indicator = func
 
-  def OnAttach(self, status):
-    if status == Skype4Py.apiAttachAvailable:
-      self.skype.Attach();
-    if status == Skype4Py.apiAttachSuccess:
-      print 'connected to skype!'
-
   def OnMessageStatus(self, mesg, Status):
-    print 'message status\n'
-    if Status == 'RECEIVED':
+    print 'message status'
+    print mesg
+    print Status
+    if Status == 'SENDING':
       print(mesg.FromDisplayName + "sent a message")
 
-      display_name = mesg.FromDisplayName
-      if not display_name in self.unread_conversations:
-        conversation = UnreadConversation(display_name, mesg.Timestamp, mesg.Sender.Handle)
-        self.name_mappings[display_name] = mesg.Sender.Handle
-        # TODO: should we do some sort of update for this?
-        self.unread_conversations[display_name] = conversation
-      else:
-        self.unread_conversations[display_name].add_timestamp(mesg.Timestamp)
-      self.cb_show_indicator(conversation)
+      #display_name = mesg.FromDisplayName
+      #if not display_name in self.unread_conversations:
+        #conversation = UnreadConversation(display_name, mesg.Timestamp, mesg.Sender.Handle)
+        #self.name_mappings[display_name] = mesg.Sender.Handle
+        ## TODO: should we do some sort of update for this?
+        #self.unread_conversations[display_name] = conversation
+      #else:
+        #self.unread_conversations[display_name].add_timestamp(mesg.Timestamp)
+      #self.cb_show_indicator(conversation)
 
   def remove_conversation(self, display_name):
     skype_name = self.name_mappings[display_name]
     del self.unread_conversations[display_name]
     return skype_name
 
-  # update unread message collection
-  # TODO: also remove messages that have been read through skype, otherwise
-  #       they would stay until somebody clicks them in the indicator-applet
-  def check_timeout(self, server):
-    print "timeout.\n"
-
-    for mesg in self.skype.MissedMessages:
-      display_name = mesg.FromDisplayName
-
-      if not display_name in self.unread_conversations:
-        conversation = UnreadConversation(display_name, mesg.Timestamp, mesg.Sender.Handle)
-        self.name_mappings[display_name] = mesg.Sender.Handle
-        # TODO: should we do some sort of update for this?
-        self.unread_conversations[display_name] = conversation
-      else:
-        self.unread_conversations[display_name].add_timestamp(mesg.Timestamp)
-        conversation = self.unread_conversations[display_name]
-      self.cb_show_indicator(conversation)
-
-    return True
-
   def show_chat_windows(self, skype_name):
-    self.skype.Client.OpenMessageDialog(self.name_mappings[skype_name]);
+    self.skype.Client.OpenMessageDialog(self.name_mappings[skype_name])
 
+  
 
+def runCheck():
+    print "in runcheck"
+    print "checking if running"
+    #print self.skype.Client.IsRunning
+    #calling self.skype.Client.IsRunning crashes. wtf. begin hack:
+    output = commands.getoutput('ps -A | grep skype' )
+    print output
+    if 'skype' not in output:
+        print "not running"
+        gtk.main_quit()
+    if 'defunct' in output:
+        print "ZOMBIES!!!"
+        gtk.main_quit()
+    print "running - restarting timer"
+    threading.Timer(5, runCheck).start()
 
 if __name__ == "__main__":
-	
-  output = commands.getoutput('ps -A | grep skype' )
-  if 'skype' in output:
-    print "Skype already running"
-  else:
-    print "Starting up Skype"
-    os.system("skype &")
-    print "Waiting 5 seconds..."
-    time.sleep(5)
 
+  os.chdir('/usr/share/skype-wrapper')
+  
+  print "1"
   skype = SkypeBehaviour();
+  print "2"
   server = NotificationServer()
-
+  print "3"
+  runCheck()
   skype.SetShowConversationCallback(server.show_conversation)
   skype.SetShowIndicatorCallback(server.show_indicator)
   server.connect(skype)
@@ -210,9 +196,9 @@ if __name__ == "__main__":
   #workaround_show_skype()
 
   # why is this needed?
-  server.activate_timeout_check()
+  #server.activate_timeout_check()
 
   # check for newly unread messages..
-  skype.check_timeout(server)
-
+  #skype.check_timeout(server)
   gtk.main()
+
