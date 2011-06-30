@@ -1,3 +1,21 @@
+This fork simply integrates the changes from the improved deb package 
+available here, for archiving purposes.
+
+    http://www.omgubuntu.co.uk/2011/04/how-to-add-and-control-skype-via-the-ubuntu-messaging-menu/
+
+I'm not familiar (yet) with Debian packaging, so there is no functioning build
+script, and the files might not be in the correct place.
+
+./bin
+   belongs into /usr/bin/
+./share
+   belongs into /usr/share
+All other files
+   belong into /usr/share/skype-wrapper
+
+
+------------------------------------------------------------------------------
+
 This is a simple skype[0] plugin for Ubuntu's indicator-applet[1].
 
 Installation:
